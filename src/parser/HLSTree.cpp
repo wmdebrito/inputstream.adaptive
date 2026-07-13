@@ -558,7 +558,7 @@ bool adaptive::CHLSTree::ProcessChildManifest(PLAYLIST::CPeriod* period,
           break;
       }
     }
-    else if (tagName == "#EXT-X-MAP")
+    else if (tagName == "#EXT-X-MAP" && !isSkipUntilDiscont)
     {
       auto attribs = ParseTagAttributes(tagValue);
       CSegment segInit;
@@ -661,7 +661,7 @@ bool adaptive::CHLSTree::ProcessChildManifest(PLAYLIST::CPeriod* period,
 
       newSegment->range_end_ += newSegment->range_begin_ - 1;
     }
-    else if (newSegment.has_value() && !line.empty() && line[0] != '#')
+    else if (newSegment.has_value() && !line.empty() && line[0] != '#' && !isSkipUntilDiscont)
     {
       // We fall here after a EXTINF (and possible EXT-X-BYTERANGE in the middle)
 
