@@ -536,7 +536,7 @@ bool adaptive::CHLSTree::ProcessChildManifest(PLAYLIST::CPeriod* period,
       // NOTE: Multiple EXT-X-KEYs can be parsed sequentially
       ProcessEncryption(rep->GetBaseUrl(), attribs, aesKey, drmInfos);
     }
-    else if (tagName == "#EXT-X-MAP")
+    else if (tagName == "#EXT-X-MAP" && !isSkipUntilDiscont)
     {
       auto attribs = ParseTagAttributes(tagValue);
       CSegment segInit;
@@ -607,7 +607,7 @@ bool adaptive::CHLSTree::ProcessChildManifest(PLAYLIST::CPeriod* period,
 
       newSegment->range_end_ += newSegment->range_begin_ - 1;
     }
-    else if (!line.empty() && line[0] != '#') // Segment url
+    else if (!line.empty() && line[0] != '#' && !isSkipUntilDiscont) // Segment url
     {
       if (rep->GetContainerType() == ContainerType::NOTYPE)
       {
