@@ -1026,6 +1026,18 @@ bool AdaptiveStream::ensureSegment()
       state_ = STOPPED;
       return false;
     }
+    else
+    {
+      // The buffered segment at position 0 (just rotated in) does not match any segment
+      // on the timeline (e.g. pruned by a live manifest update) and none of the above
+      // cases applied. ResetSegment() was not called, so segment_read_pos_ is still the
+      // stale value from the previously consumed segment. Falling through to "return true"
+      // here would make read() compute segment_buffers_[0]->buffer.size() - segment_read_pos_
+      // on a buffer it was never reset for, underflow, and crash in memcpy. Report
+      // not-ready instead so the caller retries later.
+      LOG::LogF(LOGDEBUG, "[AS-%u] Next segment not found on the timeline, waiting", clsId);
+      return false;
+    }
   }
   return true;
 }
