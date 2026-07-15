@@ -798,7 +798,15 @@ bool adaptive::CHLSTree::ProcessChildManifest(PLAYLIST::CPeriod* period,
     }
     else if (tagName == "#EXT-X-DISCONTINUITY")
     {
-      if (!newSegments.IsEmpty() && !isSkipUntilDiscont)
+      // If the discontinuity sequence could not be resolved, "period" is null
+      // and there is no valid period/representation to build the next period
+      // from (cloning via CopyHLSData would dereference the null period).
+      // Keep skipping; the parse ends in ParseStatus::ERROR below, triggering a
+      // fresh manifest download.
+      if (isSkipUntilDiscont)
+        continue;
+
+      if (!newSegments.IsEmpty())
       {
         period->SetSequence(m_discontSeq + discontCount);
 
