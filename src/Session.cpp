@@ -1129,6 +1129,11 @@ int CSession::GetChapter() const
 {
   if (m_adaptiveTree)
   {
+    // m_periods can be concurrently erased/reallocated by the tree update thread
+    // (e.g. on HLS discontinuity-sequence corrections), so guard the read.
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
     for (auto itPeriod = m_adaptiveTree->m_periods.cbegin();
          itPeriod != m_adaptiveTree->m_periods.cend(); itPeriod++)
     {
@@ -1146,6 +1151,9 @@ int SESSION::CSession::GetChapterCount() const
   if (!m_adaptiveTree)
     return 0;
 
+  std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+      m_adaptiveTree->GetTreeUpdMutex());
+
   return static_cast<int>(m_adaptiveTree->m_periods.size());
 }
 
@@ -1156,6 +1164,9 @@ const char* SESSION::CSession::GetChapterName(int number) const
   // so show the period ID for debugging purpose at request
   if (CSrvBroker::GetSettings().IsDebugVerbose() && m_adaptiveTree)
   {
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
     --number; // To convert chapter number to index
     if (number >= 0 && number < static_cast<int>(m_adaptiveTree->m_periods.size()))
       return m_adaptiveTree->m_periods[number]->GetId().c_str();
@@ -1170,13 +1181,14 @@ int64_t SESSION::CSession::GetChapterPos(int number) const
   if (!m_adaptiveTree)
     return 0;
 
+  // m_periods can be concurrently erased/reallocated by the tree update thread
+  // (e.g. on HLS discontinuity-sequence corrections), so guard the whole read
+  // (bounds check + access) instead of just the size check below.
+  std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+      m_adaptiveTree->GetTreeUpdMutex());
+
   --number; // To convert chapter number to index
 
-  //! @todo: Fragile check, accessing to m_periods can potentially cause problems because
-  //! manifest updates can make changes (add/remove) to periods asynchronously.
-  //! An appropriate solution must be found, taking into account that these methods
-  //! can be called many times during playback. This issue must also be checked in
-  //! all other CSession methods on which Kodi core makes callbacks.
   if (number < 0 || number >= static_cast<int>(m_adaptiveTree->m_periods.size()))
     return 0;
 
@@ -1194,13 +1206,21 @@ int64_t SESSION::CSession::GetChapterPos(int number) const
 uint64_t SESSION::CSession::GetChapterStartTime() const
 {
   uint64_t start_time = 0;
-  for (std::unique_ptr<CPeriod>& p : m_adaptiveTree->m_periods)
+
+  if (m_adaptiveTree)
   {
-    if (p.get() == m_adaptiveTree->m_currentPeriod)
-      break;
-    else
-      start_time += (p->GetTlDuration() * STREAM_TIME_BASE) / p->GetTimescale();
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
+    for (std::unique_ptr<CPeriod>& p : m_adaptiveTree->m_periods)
+    {
+      if (p.get() == m_adaptiveTree->m_currentPeriod)
+        break;
+      else
+        start_time += (p->GetTlDuration() * STREAM_TIME_BASE) / p->GetTimescale();
+    }
   }
+
   return start_time;
 }
 
@@ -1219,6 +1239,9 @@ bool SESSION::CSession::SeekChapter(int number)
 
   if (m_adaptiveTree->IsChangingPeriod())
     return true;
+
+  std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+      m_adaptiveTree->GetTreeUpdMutex());
 
   --number; // To convert chapter number to index
   if (number >= 0 && number < static_cast<int>(m_adaptiveTree->m_periods.size()) &&
