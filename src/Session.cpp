@@ -1432,6 +1432,11 @@ int CSession::GetChapter() const
 {
   if (m_adaptiveTree)
   {
+    // m_periods can be concurrently erased/reallocated by the tree update thread
+    // (e.g. on HLS discontinuity-sequence corrections), so guard the read.
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
     for (auto itPeriod = m_adaptiveTree->m_periods.cbegin();
          itPeriod != m_adaptiveTree->m_periods.cend(); itPeriod++)
     {
@@ -1446,8 +1451,14 @@ int CSession::GetChapter() const
 
 int CSession::GetChapterCount() const
 {
-  if (m_adaptiveTree && m_adaptiveTree->m_periods.size() > 1)
+  if (m_adaptiveTree)
+  {
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
+    if (m_adaptiveTree->m_periods.size() > 1)
       return static_cast<int>(m_adaptiveTree->m_periods.size());
+  }
 
   return 0;
 }
@@ -1456,6 +1467,9 @@ std::string CSession::GetChapterName(int ch) const
 {
   if (m_adaptiveTree)
   {
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
     --ch;
     if (ch >= 0 && ch < static_cast<int>(m_adaptiveTree->m_periods.size()))
       return m_adaptiveTree->m_periods[ch]->GetId().data();
@@ -1469,10 +1483,16 @@ int64_t CSession::GetChapterPos(int ch) const
   int64_t sum{0};
   --ch;
 
-  for (; ch; --ch)
+  if (m_adaptiveTree)
   {
-    sum += (m_adaptiveTree->m_periods[ch - 1]->GetDuration() * STREAM_TIME_BASE) /
-           m_adaptiveTree->m_periods[ch - 1]->GetTimescale();
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
+    for (; ch; --ch)
+    {
+      sum += (m_adaptiveTree->m_periods[ch - 1]->GetDuration() * STREAM_TIME_BASE) /
+             m_adaptiveTree->m_periods[ch - 1]->GetTimescale();
+    }
   }
 
   return sum / STREAM_TIME_BASE;
@@ -1481,13 +1501,21 @@ int64_t CSession::GetChapterPos(int ch) const
 uint64_t CSession::GetChapterStartTime() const
 {
   uint64_t start_time = 0;
-  for (std::unique_ptr<CPeriod>& p : m_adaptiveTree->m_periods)
+
+  if (m_adaptiveTree)
   {
-    if (p.get() == m_adaptiveTree->m_currentPeriod)
-      break;
-    else
-      start_time += (p->GetDuration() * STREAM_TIME_BASE) / p->GetTimescale();
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
+
+    for (std::unique_ptr<CPeriod>& p : m_adaptiveTree->m_periods)
+    {
+      if (p.get() == m_adaptiveTree->m_currentPeriod)
+        break;
+      else
+        start_time += (p->GetDuration() * STREAM_TIME_BASE) / p->GetTimescale();
+    }
   }
+
   return start_time;
 }
 
@@ -1514,6 +1542,9 @@ bool CSession::SeekChapter(int ch)
 {
   if (m_adaptiveTree->IsChangingPeriod())
     return true;
+
+  std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+      m_adaptiveTree->GetTreeUpdMutex());
 
   --ch;
   if (ch >= 0 && ch < static_cast<int>(m_adaptiveTree->m_periods.size()) &&
