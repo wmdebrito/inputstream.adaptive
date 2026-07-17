@@ -13,7 +13,9 @@
 #include "common/AdaptiveUtils.h"
 #include "utils/CurlUtils.h"
 
+#include <optional>
 #include <unordered_map>
+#include <utility>
 
 namespace adaptive
 {
@@ -257,6 +259,13 @@ private:
 
   uint8_t m_segmentIntervalSec = 4;
   std::optional<uint32_t> m_discontSeq;
+
+  // Cache of the last FixDiscSequence() correction (raw discSeqNumber -> fixed
+  // value). The video and audio child manifests are parsed independently, in
+  // quick succession, and can report the same raw (broken) discSeqNumber; see
+  // FixDiscSequence() for why the correction must be reused rather than
+  // re-derived for a repeated raw value.
+  std::optional<std::pair<uint32_t, uint32_t>> m_lastFixedDiscSeq;
 
   // Period index incremented to every new period added
   uint16_t m_periodIndex{1};

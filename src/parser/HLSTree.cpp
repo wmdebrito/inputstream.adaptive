@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 using namespace PLAYLIST;
 using namespace UTILS;
@@ -301,6 +302,25 @@ void adaptive::CHLSTree::FixMediaSequence(std::stringstream& streamData,
 
 void adaptive::CHLSTree::FixDiscSequence(std::stringstream& streamData, uint32_t& discSeqNumber)
 {
+  // The video and audio child manifests belong to the same tree but are downloaded
+  // and parsed independently, in quick succession. When the source reports the same
+  // (broken) raw discSeqNumber for both, re-deriving the fix separately for each
+  // risks a different answer: processing the first stream's #EXT-X-DISCONTINUITY-SEQUENCE
+  // tag already mutates m_periods (deleting/clearing periods) before the second
+  // stream's call runs this same heuristic against that now-changed state. That
+  // divergence (e.g. video corrected to N, audio corrected to N+1 for the very same
+  // raw value moments apart) hands Kodi two different periods/PTS references for
+  // what should be the same instant, and its continuity checker can get stuck
+  // fighting between them. Reuse the last correction for a repeated raw input
+  // instead of recomputing it against a since-mutated period list.
+  if (m_lastFixedDiscSeq.has_value() && discSeqNumber == m_lastFixedDiscSeq->first)
+  {
+    discSeqNumber = m_lastFixedDiscSeq->second;
+    return;
+  }
+
+  const uint32_t discSeqNumberRaw = discSeqNumber;
+
   std::streampos streamInitPos = streamData.tellg();
   uint64_t currentDateTime{0};
   uint64_t currentSegDurMs{0};
@@ -421,6 +441,8 @@ void adaptive::CHLSTree::FixDiscSequence(std::stringstream& streamData, uint32_t
              discSeqNumber, discSeqNumberFix);
     discSeqNumber = discSeqNumberFix;
   }
+
+  m_lastFixedDiscSeq = std::make_pair(discSeqNumberRaw, discSeqNumberFix);
 }
 
 bool adaptive::CHLSTree::ProcessChildManifest(PLAYLIST::CPeriod* period,
