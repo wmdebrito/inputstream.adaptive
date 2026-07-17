@@ -64,24 +64,28 @@ ES_h264::~ES_h264()
 {
 }
 
-static unsigned int unescape(const uint8_t * in, uint8_t *out, unsigned int in_size)
+// Writes at most out_capacity bytes to "out" and returns the number of bytes
+// actually written. The caller must only read that many bytes back from
+// "out": an oversized NAL is truncated here rather than overflowing the
+// destination buffer.
+static unsigned int unescape(const uint8_t * in, uint8_t *out, unsigned int in_size,
+                              unsigned int out_capacity)
 {
   unsigned int zero_count = 0;
-  unsigned int bytes_removed = 0;
+  unsigned int out_written = 0;
 
-  for (unsigned int i = 0; i<in_size; i++) {
+  for (unsigned int i = 0; i<in_size && out_written < out_capacity; i++) {
     if (zero_count >= 2 && in[i] == 3 && i + 1 < in_size && in[i + 1] <= 3) {
-      ++bytes_removed;
       zero_count = 0;
     }
     else {
-      out[i - bytes_removed] = in[i];
+      out[out_written++] = in[i];
       if (in[i] == 0) {
         ++zero_count;
       }
     }
   }
-  return in_size - bytes_removed;
+  return out_written;
 }
 
 void ES_h264::Parse(STREAM_PKT* pkt)
@@ -109,7 +113,8 @@ void ES_h264::Parse(STREAM_PKT* pkt)
       {
         int codeOffset = p >= 5 && es_buf[p - 5] == 0 ? 5 : 4;
         uint8_t unescaped[256];
-        unsigned int usize = unescape(es_buf + pOld + 1, unescaped, p - pOld - codeOffset - 1);
+        unsigned int usize =
+            unescape(es_buf + pOld + 1, unescaped, p - pOld - codeOffset - 1, sizeof(unescaped));
         Parse_SPS(unescaped, usize, false);
 
         m_streamData.sps[m_SPSRawId].raw_data_size = p - pOld - codeOffset;
