@@ -237,6 +237,15 @@ private:
   bool m_hasDiscontSeq = false;
   uint32_t m_discontSeq = 0;
 
+  // Cache of the last FixDiscSequence() correction (raw discSeqNumber -> fixed
+  // value). The video and audio child manifests are parsed independently, in
+  // quick succession, and can report the same raw (broken) discSeqNumber; see
+  // FixDiscSequence() for why the correction must be reused rather than
+  // re-derived for a repeated raw value.
+  bool m_hasLastFixedDiscSeq = false;
+  uint32_t m_lastFixedDiscSeqNumberRaw = 0;
+  uint32_t m_lastFixedDiscSeqNumberFix = 0;
+
   std::vector<uint8_t> m_currentPssh; // Last processed encryption PSSH from URI
   std::string m_currentDefaultKID; // Last processed encryption KID
   std::string m_currentKidUrl; // Last processed encryption KID URI
