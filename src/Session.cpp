@@ -1543,30 +1543,47 @@ bool CSession::SeekChapter(int ch)
   if (m_adaptiveTree->IsChangingPeriod())
     return true;
 
-  std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
-      m_adaptiveTree->GetTreeUpdMutex());
-
-  --ch;
-  if (ch >= 0 && ch < static_cast<int>(m_adaptiveTree->m_periods.size()) &&
-      m_adaptiveTree->m_periods[ch].get() != m_adaptiveTree->m_currentPeriod)
+  // Only the m_periods read/bounds-check needs the tree-update lock. Do NOT hold
+  // it across WaitReadSampleAsyncComplete() below: that call blocks on an async
+  // ReadSample() which can itself block in AdaptiveStream::ensureSegment() waiting
+  // for a new segment to appear on the timeline - a segment that can only be added
+  // by TreeUpdateThread::Worker() calling OnUpdateSegments(). Worker() can't run
+  // while this lock is held (it waits for the pause count to drop to zero), so
+  // holding the lock across the wait is a circular-wait deadlock: this function
+  // waits for a segment, the segment waits for the tree update, and the tree
+  // update waits for this function to release the lock.
+  bool isChangingPeriod{false};
+  CPeriod* nextPeriod{nullptr};
   {
-    CPeriod* nextPeriod = m_adaptiveTree->m_periods[ch].get();
-    m_adaptiveTree->m_nextPeriod = nextPeriod;
-    LOG::LogF(LOGDEBUG, "Switching to new Period (id=%s, start=%llu, seq=%u)",
-              nextPeriod->GetId().data(), nextPeriod->GetStart(), nextPeriod->GetSequence());
+    std::lock_guard<adaptive::AdaptiveTree::TreeUpdateThread> lckUpdTree(
+        m_adaptiveTree->GetTreeUpdMutex());
 
-    for (auto& stream : m_streams)
+    --ch;
+    if (ch >= 0 && ch < static_cast<int>(m_adaptiveTree->m_periods.size()) &&
+        m_adaptiveTree->m_periods[ch].get() != m_adaptiveTree->m_currentPeriod)
     {
-      ISampleReader* sr{stream->GetReader()};
-      if (sr)
-      {
-        sr->WaitReadSampleAsyncComplete();
-        sr->Reset(true);
-      }
+      nextPeriod = m_adaptiveTree->m_periods[ch].get();
+      m_adaptiveTree->m_nextPeriod = nextPeriod;
+      isChangingPeriod = true;
     }
-    return true;
   }
-  return false;
+
+  if (!isChangingPeriod)
+    return false;
+
+  LOG::LogF(LOGDEBUG, "Switching to new Period (id=%s, start=%llu, seq=%u)",
+            nextPeriod->GetId().data(), nextPeriod->GetStart(), nextPeriod->GetSequence());
+
+  for (auto& stream : m_streams)
+  {
+    ISampleReader* sr{stream->GetReader()};
+    if (sr)
+    {
+      sr->WaitReadSampleAsyncComplete();
+      sr->Reset(true);
+    }
+  }
+  return true;
 }
 
 bool CSession::ExtractStreamProtectionData(PLAYLIST::CPeriod::PSSHSet& sessionPsshset,
